@@ -1,0 +1,413 @@
+
+import React from "react";
+import { createStyles, makeStyles } from "@mui/styles";
+import { Theme } from "@mui/material";
+import LocalView from "./components/LocalView";
+import RemoteView from "./components/RemoteView";
+import CallActions from "./components/CallActions";
+import Avatar from "./components/Avatar";
+import { useDispatch, useSelector } from "react-redux";
+import { getAstrologersDetail } from "../astrologers/action";
+import { ReducersModal } from "../../modal";
+
+
+import Utils from "../../Utils";
+import { ZegoExpressEngine } from "zego-express-engine-webrtc";
+import { ZIM } from 'zego-zim-web'
+import { useLocation } from "react-router-dom";
+import { useNavigate } from 'react-router-dom';
+
+
+
+const useStyles = makeStyles((theme: Theme) =>
+    createStyles({
+        videoCallingWrapper: {
+            width: '500px',
+            height: 'calc(100vh - 100px)',
+            backgroundColor: '#00000042',
+            position: 'relative'
+        },
+        LocalViewWrapper: {
+            width: '150px',
+            height: '200px',
+            borderRadius: '20px',
+            boxShadow: '0 0 10px #ffffff8a',
+            position: 'absolute',
+            top: '20px',
+            right: '15px',
+            backgroundColor: '#f0f8ff',
+            zIndex: 9999
+        }
+    })
+);
+
+const zegoAppId = process.env.REACT_APP_ZEGO_APP_ID;
+const zegoServer = process.env.REACT_APP_ZEGO_SERVER_URL;
+
+const zego_Instance = new ZegoExpressEngine(Number(zegoAppId), String(zegoServer));
+console.warn(zego_Instance);
+
+let zim = ZIM.create({ appID: Number(zegoAppId) });
+console.warn(zim);
+
+const accessToken = localStorage.getItem('access_token');
+function VideoCall() {
+    const classes = useStyles();
+    const dispatch = useDispatch();
+    const url = window.location.href;
+    const astroId = url.split('/')[4];
+
+    const user_data: any = localStorage.getItem("user_name");
+    const parsed_user_data = JSON.parse(user_data);
+    let userData = null;
+    userData = parsed_user_data;
+    const current_user_id = parsed_user_data.id;
+const [user_id, setUserId] = React.useState('');
+    const astrologerID = localStorage.getItem('astroData');
+    // =================================================
+
+    let localStream = null;
+    let deviceInfo: any = null;
+    let streamRoom = null;
+    let localVideo: any = null;
+    const stream_id = `user_room_astro_${astrologerID}`;
+
+    const [zegoLofinFlag, setZegoLoginFlag] = React.useState(false);
+    const [zimLofinFlag, setZimLoginFlag] = React.useState(false);
+  
+    userData = parsed_user_data;
+    const user_name = `${parsed_user_data.first_name}_${parsed_user_data.last_name}`
+    const room_id = `room_astro_${astrologerID}`;
+    const [instanceFlag, setInstanceFlaf] = React.useState(true);
+localStorage.setItem("room_id", room_id);
+    const astroData = localStorage.getItem("astroData");
+  
+    const [remoteUserId, setRemoteUserId] = React.useState(null)
+    const [zego_token, setZego_token] = React.useState('');
+
+const [streamInput, setStreamInput] = React.useState('');
+
+const [callInitiated, setCallInitiated] = React.useState(false);
+const [callAccepted, setCallAccepted] = React.useState(false);
+const [isCalOngoing, setIsCallOngoing] = React.useState(false)
+const [caleeId, setCaleeId] = React.useState('');
+
+    const getZegoToken = () => {
+        return (dispatch: any) => {
+            Utils.api.generateZegoToken(Utils.endPoints.zegoToken,
+                (responseData: any) => {
+                    const { data } = responseData;
+                    console.log("ZEGO TOKEN", responseData)
+                    if (responseData.status === 200) {
+                        localStorage.setItem("zego_token", data[0]);
+                        setZego_token(data[0])
+                        setUserId(data[3])
+                    } else {
+                        Utils.showAlert(2, responseData.message)
+                    }
+                }, (error: any) => {
+                    let { data } = error;
+                    Utils.showAlert(2, data.message)
+                })
+        }
+    }
+
+    const getUserId = (user_id: any) => {
+        return (dispatch: any) => {
+            Utils.api.generateZegoToken(`${Utils.endPoints.zegi_uuid}?user_id=${user_id}`,
+                (responseData: any) => {
+                    const { data } = responseData;
+                    console.warn("ASTRO user  ID", responseData)
+                    if (responseData.status === 200) {
+                        // localStorage.setItem("zego_token", data[0]);
+                        // setZego_token(data[0])
+                        setCaleeId(data.zego_username);
+                    } else {
+                        Utils.showAlert(2, responseData.message)
+                    }
+                }, (error: any) => {
+                    let { data } = error;
+                    Utils.showAlert(2, data.message)
+                })
+        }
+    }
+
+   
+    console.warn('NEW USER ID GENERAT', user_id)
+    React.useEffect(() => {
+        dispatch(getAstrologersDetail(astroId))
+    }, []);
+
+    React.useEffect(() => {
+        dispatch(getZegoToken());
+    }, []);
+
+    React.useEffect(() => {
+        dispatch(getUserId(astrologerID));
+        
+    }, [])
+
+    const { astroDetailData } = useSelector((state: ReducersModal) => state.astrologerDetailDataReducer);
+    const { User, Astrologer } = astroDetailData;
+    console.warn(Astrologer)
+    // const zego_token = localStorage.getItem("zego_token");
+
+    const userInfo = {
+        userID: String(user_id),
+        userName: user_name
+    };
+
+    const zimLogin = (userInfo: any, token: any) => {
+        if (zim != null) {
+            zim.login(userInfo, token)
+                .then(function () {
+                    console.warn("ZIM LOGIN ======================== Sucess");
+                    setZimLoginFlag(true)
+                })
+                .catch(function (err: any) {
+                    console.warn("ZIM LOGIN", err)
+                });
+        }
+    }
+    const roomLogin = async (current_uuid: any) => {
+        console.warn("in room login", current_uuid)
+        deviceInfo = await zego_Instance.enumDevices()
+        try {
+            const systemRequirements = await zego_Instance.checkSystemRequirements();
+            if (systemRequirements.result == undefined) {
+                try {
+                    streamRoom = await zego_Instance.loginRoom(
+                        room_id,
+                        String(zego_token),
+                        {
+                            userID: String(current_uuid),
+                            userName: user_name
+                        },
+                       
+                        { userUpdate: true, maxMemberCount: 2 }
+                    )
+
+                    setZegoLoginFlag(true);
+                    localView()
+                  console.warn("USER LOGGED INTO THE ROOM -- SUCCESS...")
+
+                } catch (error) {
+                    console.log("LOGIN ERROR", error)
+                }
+            }
+        } catch (error) {
+            console.log("UPPER ERROR", error)
+        }
+    }
+
+
+
+
+
+ 
+    const localView = async () => {
+        localStream = await zego_Instance.createStream({
+            camera: {
+                audioInput: deviceInfo.microphones[0].deviceID,
+                videoInput: deviceInfo.cameras[0].deviceID,
+                video: true,
+                audio: true,
+            }
+        });
+        const localView = zego_Instance.createLocalStreamView(localStream);
+        localVideo = localView;
+        zego_Instance.startPublishingStream(stream_id,
+            localStream,
+            { videoCodec: 'VP8' });
+        console.warn("VIEW--", localView);
+
+        localView.play("local-video-streaming-container", {
+            mirror: true,
+            objectFit: "cover",
+            enableAutoplayDialog: true,
+        })
+    }
+
+    const remoteUser = async (strm_id: any) => {
+        console.warn("REMOTE USER STREAM ID --", strm_id)
+        try {
+            console.warn('STREAM ID WORKING')
+            const remoteStream = await zego_Instance.startPlayingStream(strm_id);
+            console.warn('STREAM  WORKING', remoteStream)
+            const remoteView = zego_Instance.createRemoteStreamView(remoteStream);
+            console.warn(remoteView)
+            remoteView.play(`remote-video-streaming-container`, {
+                objectFit: "cover",
+                enableAutoplayDialog: true,
+            });
+        } catch (err) {
+            console.warn('STREAM ID ERROR', err)
+        }
+    }
+
+    zego_Instance.on('roomStateUpdate', (roomID, state, errorCode, extendedData) => {
+        if (state == 'DISCONNECTED') {
+            console.warn(state);
+            // roomLogin()
+        }
+        if (state == 'CONNECTING') {
+            console.warn(state)
+        }
+        if (state == 'CONNECTED') {
+            console.warn(state);
+            // zego_Instance.logoutRoom(room_id);
+        }
+    });
+
+    zego_Instance.on('roomStreamUpdate', (room_id: any, updateType: any, streamList: any, extendedData: any) => {
+        if (updateType == 'ADD') {
+            console.table(streamList, room_id);
+        } else if (updateType == 'DELETE') {
+            // Stream deleted, stop playing the stream.
+        }
+    });
+
+
+    zim && zim.on('callInvitationAccepted', function (zim, { callID, invitee, extendedData }) {
+        console.log('callInvitationAccepted', { callID, invitee, extendedData });
+        setCallAccepted(true);
+        remoteUser(extendedData)
+    });
+
+    zego_Instance.on('roomUserUpdate', (roomID, updateType, userList) => {
+        console.warn("ROOM USER UPDATE", roomID, updateType, userList)
+    });
+
+
+    var invitees = [String(caleeId)];
+    var config = { timeout: 600, extendedData: stream_id };
+    const callUser = () => {
+        console.log(zim);
+        try {
+            zim && zim.callInvite(invitees, config)
+                .then(function ({ callID, timeout, errorInvitees }) {
+                    console.log(callID, timeout, errorInvitees);
+                    setCallInitiated(true);
+                })
+                .catch(function (err: any) {
+                    console.warn("INVITE ERROR", err);
+                    setCallInitiated(false);
+                });
+        } catch (err) {
+            console.log("ZIM ERROR", err);
+            setCallInitiated(false);
+        }
+    }
+    // =================================================
+
+const stopStreaming = (streaming_id: any) => {
+    zego_Instance.stopPublishingStream(streaming_id);
+    zego_Instance.destroyStream(streaming_id);
+    zego_Instance.stopPlayingStream(streaming_id)
+}
+
+const roomLogout = (room_id_logout: any) => {
+    zego_Instance.logoutRoom(room_id_logout)
+}
+
+const cancelCall = (callInvitees: any, call_id: any, call_congig: any) => {
+   zim && zim.callCancel(callInvitees, call_id, call_congig)
+    .then(function({ callID, errorInvitees }){
+        // Operation successful.
+    })
+    .catch(function(err){
+        // Operation failed.
+    })
+}
+
+const location = window.location.href.split('/').pop();
+console.warn("LOCATION", location)
+
+setTimeout(() => {
+    if(user_id != '' && zego_token != '' && zego_token !== null && zego_token !== undefined && zegoLofinFlag != true){
+       
+        roomLogin(user_id);
+        // zego_Instance.logoutRoom(room_id);
+    }
+}, 1000);
+
+// const new_location = useLocation();
+// React.useEffect(() => {
+//     alert('ROUTE CHANGED')
+// }, [!new_location])
+
+
+
+setTimeout(() => {
+    if(user_id != '' && zego_token != '' && zego_token !== null && zego_token !== undefined && zimLofinFlag != true){
+        console.warn("ZIM INFO", userInfo, zego_token)
+        zimLogin(userInfo, String(zego_token))
+    }
+}, 2000);
+
+setTimeout(() => {
+   if(caleeId != '' && zegoLofinFlag == true && zimLofinFlag == true && callInitiated != true) {
+
+    console.warn("LOGGEDIN STATUS", zegoLofinFlag, zimLofinFlag)
+    callUser()
+    }
+   
+}, 3000);
+
+const callAcceptStatus = (acceptStatus: any) => {
+    if(acceptStatus) {
+       
+    }
+}
+
+    return (
+        <div>
+            <div className={classes.videoCallingWrapper}>
+                {/* <button onClick={() => { roomLogin() }}>Room Login</button>
+                <button onClick={() => { zimLogin(userInfo, String(zego_token));}}>Zim Login</button>
+                <input type="text" onChange={(e) => {setStreamInput(e.target.value)}} placeholder="Enter stream ID"/>
+                <button onClick={() => {remoteUser(streamInput)}}>Remote stream</button> */}
+                {
+                    zimLofinFlag !== null ?
+                        <button onClick={callUser}>Call</button> : 'no zim'
+                }
+                <button onClick={() => {zego_Instance.logoutRoom(room_id)}}>Logout</button>
+<p>Stream ID :- {streamInput}</p>
+
+{/* ==================calling=================== */}
+<div className={classes.LocalViewWrapper} id='local-video-streaming-container'></div>
+                {
+                    callAccepted && callAccepted == true ?
+                        <div>
+                            <div style={{ width: '100%' }} id='remote-video-streaming-container'></div>
+
+                           
+                        </div> :
+                        <div>
+                            {
+                                User && User ?
+                                    <Avatar
+                                        name={User.first_name}
+                                        shortName={User.shortName}
+                                        image={User.profile_image}
+                                    /> : ''
+                            }
+                        </div>
+                }
+               
+                
+
+                <CallActions 
+                 isMic = {true}
+                 isCamera = {true}
+                 isAcceptCall = {false}
+                 isRejectCall = {true}
+                 accepted = {callAcceptStatus}
+                />
+            </div>
+
+        </div>
+    )
+}
+
+export default VideoCall
